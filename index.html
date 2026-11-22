@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f5ec" />
+    <meta name="description" content="Explore the Purdue Cycling Club territory map and leaderboards." />
+    <link rel="icon" href="/encircle.svg" type="image/svg+xml" />
+    <title>Encircle — Purdue Cycling Club</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#territory" aria-label="Encircle map">
+          <span class="brand-mark" aria-hidden="true"><i data-icon="Grid2X2Plus"></i></span>
+          <span>encircle<span class="brand-period">.</span></span>
+        </a>
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="#territory" aria-current="location">Map</a>
+          <a href="#standings">Standings</a>
+          <button id="open-rules" type="button">How to play</button>
+        </nav>
+        <span id="mode-badge" class="mode-badge"><span></span><span id="mode-label">Demo data</span></span>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="page-intro" aria-labelledby="page-title">
+        <div>
+          <p class="club-name">Purdue Cycling Club</p>
+          <h1 id="page-title">Territory map</h1>
+          <p class="intro-description" id="intro-description">See who controls each square across Indiana and Illinois.</p>
+        </div>
+        <div class="intro-actions">
+          <button id="open-import" class="primary-button" type="button" hidden><i data-icon="Upload"></i> Import GPX</button>
+          <div class="region-control">
+            <label for="region">Play region</label>
+            <div class="select-wrap">
+              <i data-icon="MapPin"></i>
+              <select id="region"></select>
+              <i data-icon="ChevronDown"></i>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="dashboard">
+        <section id="territory" class="map-card" aria-label="Territory map">
+          <div class="map-toolbar">
+            <div class="map-place">
+              <i data-icon="MapPin"></i>
+              <span id="map-place">West Lafayette, IN</span>
+            </div>
+            <button id="region-view" type="button" class="subtle-button">
+              <i data-icon="Maximize"></i> <span>Full region</span>
+            </button>
+          </div>
+          <div id="map-body" class="map-body">
+            <div id="map" class="map-canvas" aria-label="Interactive map of cycling territory"></div>
+            <p id="map-notice" class="map-notice" role="status">Loading map…</p>
+            <div class="map-controls" id="map-controls" hidden>
+              <div class="zoom-controls" role="group" aria-label="Map zoom">
+                <button id="zoom-in" type="button" aria-label="Zoom in" title="Zoom in"><i data-icon="Plus"></i></button>
+                <button id="zoom-out" type="button" aria-label="Zoom out" title="Zoom out"><i data-icon="Minus"></i></button>
+              </div>
+              <button id="map-home" type="button" aria-label="Return to local view" title="Return to local view">
+                <i data-icon="LocateFixed"></i>
+              </button>
+            </div>
+            <section id="square-detail" class="square-detail" aria-label="Square scores" aria-live="polite" hidden>
+              <div class="detail-heading">
+                <h2 id="square-title"></h2>
+                <button id="close-square" type="button" aria-label="Close square scores"><i data-icon="X"></i></button>
+              </div>
+              <ul id="square-scores"></ul>
+            </section>
+          </div>
+          <div class="map-footer">
+            <span><i data-icon="Grid2X2"></i> 0.2 × 0.2 mi squares</span>
+            <span id="map-filter" hidden><button id="clear-rider" type="button"></button></span>
+            <span class="map-hint"><i data-icon="MousePointer2"></i> Select a square to see scores</span>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <section id="standings" class="standings-card" aria-labelledby="standings-title" tabindex="-1">
+            <div class="card-heading">
+              <span class="card-icon"><i data-icon="Trophy"></i></span>
+              <div>
+                <h2 id="standings-title">Club standings</h2>
+                <p id="standings-summary">Rankings for this region</p>
+              </div>
+            </div>
+            <div class="board-tabs" role="group" aria-label="Leaderboard type">
+              <button class="board-tab" data-board="held" type="button" aria-pressed="true">Squares controlled</button>
+              <button class="board-tab" data-board="capture" type="button" aria-pressed="false">Largest capture</button>
+            </div>
+            <div class="board-labels" aria-hidden="true"><span id="rank-label">Rank / rider</span><span>Squares</span></div>
+            <ol id="rider-list" class="rider-list" aria-live="polite"></ol>
+          </section>
+
+          <section class="legend-card" aria-labelledby="legend-title">
+            <div class="legend-heading">
+              <i data-icon="Layers"></i>
+              <h2 id="legend-title">Map key</h2>
+            </div>
+            <div class="legend-items">
+              <div><span class="legend-chip controlled"></span> Rider territory</div>
+              <div><span class="legend-chip shared"></span> Shared control</div>
+              <div><span class="legend-chip boundary"></span> Play boundary</div>
+            </div>
+            <p class="legend-note">Rider colors match the standings. Tied leaders each get credit for shared squares.</p>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <dialog id="rules" aria-labelledby="rules-title">
+      <div class="dialog-heading">
+        <span class="card-icon"><i data-icon="Bike"></i></span>
+        <form method="dialog"><button class="icon-button" type="submit" aria-label="Close rules"><i data-icon="X"></i></button></form>
+      </div>
+      <h2 id="rules-title">How to play</h2>
+      <ol class="rules-list">
+        <li><strong>Ride through a square.</strong> Each ride earns a point in every 0.2-mile square it crosses.</li>
+        <li><strong>Close a loop.</strong> Earn one bonus point in each square inside the loop.</li>
+        <li><strong>Take control.</strong> The top score owns the square. Tied leaders share it, and each gets credit in the standings.</li>
+        <li><strong>Climb the boards.</strong> Compare squares you control now and the most squares you enclosed in a single ride.</li>
+      </ol>
+    </dialog>
+    <dialog id="import-dialog" aria-labelledby="import-title">
+      <div class="dialog-heading">
+        <span class="card-icon"><i data-icon="Upload"></i></span>
+        <form method="dialog"><button class="icon-button" type="submit" aria-label="Close import"><i data-icon="X"></i></button></form>
+      </div>
+      <h2 id="import-title">Import GPX rides</h2>
+      <p>Choose dated GPX activity files. Each ride scores for its year in Indiana.</p>
+      <form id="import-form">
+        <label for="gpx-files">Ride files</label>
+        <input id="gpx-files" type="file" accept=".gpx,application/gpx+xml" multiple required />
+        <button id="submit-import" class="primary-button" type="submit">Score rides</button>
+        <p id="import-status" role="status" hidden></p>
+        <ul id="import-results" class="import-results" hidden></ul>
+      </form>
+    </dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

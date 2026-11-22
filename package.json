@@ -1,0 +1,27 @@
+{
+  "name": "encircle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource-variable/space-grotesk": "5.3.0",
+    "jsts": "2.12.1",
+    "lucide": "1.74.0",
+    "mapbox-gl": "3.35.0",
+    "maplibre-gl": "6.19.0",
+    "proj4": "2.23.0"
+  },
+  "devDependencies": {
+    "vite": "6.4.6"
+  },
+  "description": "Encircle is a cycling territory game for Purdue Cycling Club. Ride through Indiana and Illinois to earn points, close loops to claim more ground, and see who controls the most squares."
+}
