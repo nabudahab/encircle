@@ -40,7 +40,7 @@ For subsequent imports, or to resume an interrupted import, run the same command
 python3 sync/strava_sync.py import --local-only
 ```
 
-The importer paginates through Strava activities in 30-day windows, processes rides oldest first, and checkpoints each completed ride. Routine imports also check the seven days preceding the last completed cutoff for late uploads. Once an import finishes, you can pass an earlier `--since` to backfill older uploads, including history before your original start date. Encircle identifies repeats by track and start time. Ride edits, removals, and visibility changes require separate reconciliation.
+The importer paginates through Strava activities in 30-day windows, processes rides oldest first, and checkpoints each completed ride. Routine imports also check the seven days preceding the last completed cutoff for late uploads. Once an import finishes, pass `--since` to replay rides from that date, including history before your original start date. Encircle identifies repeats by track and start time and replaces the saved awards if the scoring rules have changed. Ride edits, removals, and visibility changes require separate reconciliation.
 
 The importer includes outdoor road, mountain bike, gravel, e-bike, e-mountain bike, handcycle, and velomobile rides. It skips indoor trainer rides, virtual rides, manual entries, and rides without usable GPS. It sends longitude and latitude in that order, splitting at invalid samples, backwards time, gaps over 60 seconds, or jumps over 500 meters. Missing time streams still allow splitting by distance. Segments need at least two distinct consecutive points. [Strava API reference](https://developers.strava.com/docs/reference/)
 

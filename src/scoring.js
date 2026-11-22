@@ -1,19 +1,14 @@
 import { readFileSync } from "node:fs";
 import Coordinate from "jsts/org/locationtech/jts/geom/Coordinate.js";
-import Envelope from "jsts/org/locationtech/jts/geom/Envelope.js";
 import GeometryFactory from "jsts/org/locationtech/jts/geom/GeometryFactory.js";
 import Location from "jsts/org/locationtech/jts/geom/Location.js";
 import IndexedPointInAreaLocator from "jsts/org/locationtech/jts/algorithm/locate/IndexedPointInAreaLocator.js";
-import STRtree from "jsts/org/locationtech/jts/index/strtree/STRtree.js";
-import RelateOp from "jsts/org/locationtech/jts/operation/relate/RelateOp.js";
 import GeoJSONReader from "jsts/org/locationtech/jts/io/GeoJSONReader.js";
-import Polygonizer from "jsts/org/locationtech/jts/operation/polygonize/Polygonizer.js";
-import UnaryUnionOp from "jsts/org/locationtech/jts/operation/union/UnaryUnionOp.js";
 import { cellKey, cellSize, midwestGrid } from "./grid.js";
 
 const { project } = midwestGrid;
+export const scoringVersion = 3;
 const maxGap = 2_000;
-const closeDistance = 40;
 const maxCandidateCells = 200_000;
 const factory = new GeometryFactory();
 const document = JSON.parse(readFileSync(new URL("../public/regions/indiana.geojson", import.meta.url), "utf8"));
@@ -24,7 +19,6 @@ const projectedBoundary = new GeoJSONReader(factory).read({
     .map((polygon) => polygon.map((ring) => ring.map(project))),
 });
 const eligibleArea = new IndexedPointInAreaLocator(projectedBoundary);
-const bounds = projectedBoundary.getEnvelopeInternal();
 
 function splitTracks(segments) {
   const tracks = [];
@@ -71,7 +65,7 @@ function visitCrossedSquares(start, end, visit) {
 
   while (t < 1 - epsilon) {
     const edge = Math.min(edgeX, edgeY, 1);
-    if (edge - t > epsilon) visit(column, row, "passed");
+    if (edge - t > epsilon) visit(column, row);
     if (edgeX <= edge + epsilon) {
       column += stepX;
       edgeX += intervalX;
@@ -84,86 +78,109 @@ function visitCrossedSquares(start, end, visit) {
   }
 }
 
-function enclosedArea(tracks) {
-  const lines = tracks.map((track) => {
-    const start = track[0];
-    const end = track.at(-1);
-    const gap = start.distance(end);
-    const closed = track.length > 2 && gap > 0 && gap <= closeDistance ? [...track, start] : track;
-    return factory.createLineString(closed);
-  });
-  const noded = UnaryUnionOp.union(factory.createMultiLineString(lines));
-  const polygonizer = new Polygonizer();
-  polygonizer.add(noded);
-  const polygons = polygonizer.getPolygons();
-  return polygons.isEmpty() ? null : UnaryUnionOp.union(polygons);
-}
+function visitEnclosedSquares(crossed, visit) {
+  let left = Infinity;
+  let right = -Infinity;
+  let bottom = Infinity;
+  let top = -Infinity;
+  for (const [column, row] of crossed.values()) {
+    left = Math.min(left, column - 1);
+    right = Math.max(right, column + 1);
+    bottom = Math.min(bottom, row - 1);
+    top = Math.max(top, row + 1);
+  }
+  const width = right - left + 1;
+  const height = top - bottom + 1;
+  const indexAt = (column, row) => (row - bottom) * width + column - left;
+  const open = 0;
+  const wall = 1;
+  const exterior = 2;
+  const bridge = 3;
+  const state = new Uint8Array(width * height);
+  for (const [column, row] of crossed.values()) {
+    state[indexAt(column, row)] = wall;
+  }
 
-function coverageCheck(polygon) {
-  const locator = new IndexedPointInAreaLocator(polygon);
-  const edges = new STRtree();
-  for (let ring = -1; ring < polygon.getNumInteriorRing(); ring++) {
-    const line = ring < 0 ? polygon.getExteriorRing() : polygon.getInteriorRingN(ring);
-    const coordinates = line.getCoordinates();
-    for (let i = 1; i < coordinates.length; i++) {
-      edges.insert(new Envelope(coordinates[i - 1], coordinates[i]), true);
+  // The empty one-square margin makes the lower-left corner an exterior seed.
+  // Four-way traversal treats diagonally touching wall cells as connected.
+  const queue = new Int32Array(state.length);
+  let size = 0;
+  function enter(index) {
+    if (state[index] !== open) return;
+    state[index] = exterior;
+    queue[size++] = index;
+  }
+  function fillExterior() {
+    size = 0;
+    enter(0);
+    for (let i = 0; i < size; i++) {
+      const index = queue[i];
+      const column = index % width;
+      if (column > 0) enter(index - 1);
+      if (column < width - 1) enter(index + 1);
+      if (index >= width) enter(index - width);
+      if (index + width < state.length) enter(index + width);
     }
   }
-  return (column, row) => {
-    const center = new Coordinate((column + 0.5) * cellSize, (row + 0.5) * cellSize);
-    if (locator.locate(center) === Location.EXTERIOR) return false;
-    const envelope = new Envelope(column * cellSize, (column + 1) * cellSize, row * cellSize, (row + 1) * cellSize);
-    if (edges.query(envelope).isEmpty()) return true;
-    return RelateOp.covers(polygon, factory.toGeometry(envelope));
-  };
+  fillExterior();
+
+  let bridged = false;
+  function bridgeAt(column, row) {
+    const index = indexAt(column, row);
+    if (state[index] !== exterior) return;
+    state[index] = bridge;
+    bridged = true;
+  }
+  const anchorOffsets = [[2, -2], [2, -1], [2, 0], [2, 1], [2, 2], [-1, 2], [0, 2], [1, 2]];
+  for (const [column, row] of crossed.values()) {
+    for (const [dx, dy] of anchorOffsets) {
+      // A bridge spans exactly one missing square and uses only recorded anchors.
+      if (!crossed.has(cellKey(column + dx, row + dy))) continue;
+      bridgeAt(column + Math.floor(dx / 2), row + Math.floor(dy / 2));
+      bridgeAt(column + Math.ceil(dx / 2), row + Math.ceil(dy / 2));
+    }
+  }
+  if (bridged) {
+    for (let i = 0; i < size; i++) {
+      if (state[queue[i]] === exterior) state[queue[i]] = open;
+    }
+    fillExterior();
+  }
+
+  let candidates = 0;
+  for (let index = 0; index < state.length; index++) {
+    // Bridge candidates wholly inside the final outline are ordinary interior
+    // squares. Only candidates on the exterior edge act as unscored walls.
+    if (state[index] === bridge) {
+      if (state[index - 1] === exterior || state[index + 1] === exterior ||
+          state[index - width] === exterior || state[index + width] === exterior) continue;
+    } else if (state[index] !== open) continue;
+    if (++candidates > maxCandidateCells) throw new RangeError("Ride encloses too large an area for a single import.");
+    visit(left + index % width, bottom + Math.floor(index / width));
+  }
 }
 
 export async function scoreIndianaRide(segments) {
   const tracks = splitTracks(segments);
-  if (tracks.length === 0) return [];
-
-  const awards = new Map();
-  const outside = new Set();
-  function visit(column, row, kind) {
-    const key = cellKey(column, row);
-    if (outside.has(key)) return;
-    let award = awards.get(key);
-    if (!award) {
-      const center = new Coordinate((column + 0.5) * cellSize, (row + 0.5) * cellSize);
-      if (eligibleArea.locate(center) === Location.EXTERIOR) {
-        outside.add(key);
-        return;
-      }
-      award = { column, row, passed: false, enclosed: false };
-      awards.set(key, award);
-    }
-    award[kind] = true;
-  }
-
+  const crossed = new Map();
   for (const track of tracks) {
-    for (let i = 1; i < track.length; i++) visitCrossedSquares(track[i - 1], track[i], visit);
-  }
-
-  const enclosed = enclosedArea(tracks);
-  let candidates = 0;
-  for (let i = 0; enclosed && i < enclosed.getNumGeometries(); i++) {
-    const polygon = enclosed.getGeometryN(i);
-    const area = polygon.getEnvelopeInternal().intersection(bounds);
-    if (area.isNull()) continue;
-
-    const covers = coverageCheck(polygon);
-    const west = Math.floor(area.getMinX() / cellSize);
-    const east = Math.floor(area.getMaxX() / cellSize);
-    const south = Math.floor(area.getMinY() / cellSize);
-    const north = Math.floor(area.getMaxY() / cellSize);
-    candidates += (east - west + 1) * (north - south + 1);
-    if (candidates > maxCandidateCells) throw new RangeError("Ride encloses too large an area for a single import.");
-
-    for (let column = west; column <= east; column++) {
-      for (let row = south; row <= north; row++) {
-        if (covers(column, row)) visit(column, row, "enclosed");
-      }
+    for (let i = 1; i < track.length; i++) {
+      visitCrossedSquares(track[i - 1], track[i], (column, row) => {
+        const key = cellKey(column, row);
+        if (!crossed.has(key)) crossed.set(key, [column, row]);
+      });
     }
   }
-  return [...awards.values()];
+  if (!crossed.size) return [];
+
+  const awards = [];
+  function addAward(column, row, passed, enclosed) {
+    const center = new Coordinate((column + 0.5) * cellSize, (row + 0.5) * cellSize);
+    if (eligibleArea.locate(center) !== Location.EXTERIOR) {
+      awards.push({ column, row, passed, enclosed });
+    }
+  }
+  for (const [column, row] of crossed.values()) addAward(column, row, true, false);
+  visitEnclosedSquares(crossed, (column, row) => addAward(column, row, false, true));
+  return awards;
 }

@@ -31,7 +31,7 @@ Set `DATABASE_URL` for the database you created. Its role needs permission to cr
 | `POST /api/rides` | Takes `{startedAt, segments}`, where `startedAt` is an ISO timestamp with a time zone and `segments` is an array of tracks containing `[longitude, latitude]` pairs. Returns `{id, playerId, passed, enclosed, duplicate}`. |
 | `DELETE /api/rides/:id` | Withdraws the ride and returns `{deleted}`. |
 
-A ride belongs to the year in which it started in the America/Indiana/Indianapolis time zone. Each year acts as one player. The API deduplicates matching timestamps and tracks and writes rides only when they earn Indiana awards. Edits to the timestamp or track can produce a new ride ID. To replace an imported ride, withdraw the old ID and import the edited recording.
+A ride belongs to the year in which it started in the America/Indiana/Indianapolis time zone. Each year acts as one player. The API deduplicates matching timestamps and tracks and writes rides only when they earn Indiana awards. Resubmitting the same recording after a scoring update replaces its previous awards in one transaction. Edits to the timestamp or track can produce a new ride ID. To replace an imported ride, withdraw the old ID and import the edited recording.
 
 ## Storage
 

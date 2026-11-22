@@ -479,6 +479,8 @@ def import_rides(strava, directory, since):
         else:
             checkpoint.floor = min(checkpoint.floor, since)
             checkpoint.backfill_next = since
+            checkpoint.handled = {key: timestamp for key, timestamp in checkpoint.handled.items()
+                                  if parse_date(timestamp) < since}
     if cutoff < checkpoint.through:
         raise SyncError("The laptop clock is behind the last import checkpoint.")
 

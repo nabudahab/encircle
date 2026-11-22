@@ -23,9 +23,10 @@ export async function initializeDatabase(pool) {
   await writeTransaction(pool, (client) => client.query(schema));
 }
 
-export async function getRide(pool, id) {
-  const { rows } = await pool.query(
-    'SELECT player_id AS "playerId", passed, enclosed FROM encircle.rides WHERE id = $1',
+export async function getRide(connection, id) {
+  const { rows } = await connection.query(
+    `SELECT player_id AS "playerId", passed, enclosed, scoring_version AS "scoringVersion"
+     FROM encircle.rides WHERE id = $1`,
     [id],
   );
   return rows[0];
@@ -33,13 +34,16 @@ export async function getRide(pool, id) {
 
 export async function saveRide(pool, ride, awards) {
   return writeTransaction(pool, async (client) => {
-    const { rowCount } = await client.query(
-      `INSERT INTO encircle.rides (id, started_at, player_id, passed, enclosed, awards)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO NOTHING`,
-      [ride.id, ride.startedAt, ride.playerId, ride.passed, ride.enclosed, JSON.stringify(awards)],
+    const existing = await getRide(client, ride.id);
+    if (existing?.scoringVersion >= ride.scoringVersion) return false;
+    if (existing) await withdrawRide(client, ride.id);
+    if (!awards.length) return true;
+
+    await client.query(
+      `INSERT INTO encircle.rides (id, started_at, player_id, passed, enclosed, awards, scoring_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [ride.id, ride.startedAt, ride.playerId, ride.passed, ride.enclosed, JSON.stringify(awards), ride.scoringVersion],
     );
-    if (rowCount === 0) return false;
 
     await client.query(
       `INSERT INTO encircle.cells (column_index, row_index, scores)
@@ -58,43 +62,45 @@ export async function saveRide(pool, ride, awards) {
   });
 }
 
+async function withdrawRide(client, id) {
+  const { rows } = await client.query(
+    `WITH removed AS (
+       DELETE FROM encircle.rides WHERE id = $1 RETURNING player_id, awards
+     ), affected AS (
+       SELECT cells.column_index, cells.row_index,
+              CASE WHEN (cells.scores->>removed.player_id)::integer = (award->>2)::integer
+                   THEN cells.scores - removed.player_id
+                   ELSE cells.scores || jsonb_build_object(
+                     removed.player_id,
+                     (cells.scores->>removed.player_id)::integer - (award->>2)::integer
+                   )
+              END AS scores
+       FROM removed
+       CROSS JOIN LATERAL jsonb_array_elements(removed.awards) AS entries(award)
+       JOIN encircle.cells ON cells.column_index = (award->>0)::integer
+                          AND cells.row_index = (award->>1)::integer
+     ), updated AS (
+       UPDATE encircle.cells
+       SET scores = affected.scores
+       FROM affected
+       WHERE cells.column_index = affected.column_index
+         AND cells.row_index = affected.row_index
+         AND affected.scores <> '{}'::jsonb
+     ), emptied AS (
+       DELETE FROM encircle.cells
+       USING affected
+       WHERE cells.column_index = affected.column_index
+         AND cells.row_index = affected.row_index
+         AND affected.scores = '{}'::jsonb
+     )
+     SELECT EXISTS(SELECT 1 FROM removed) AS deleted`,
+    [id],
+  );
+  return rows[0].deleted;
+}
+
 export async function removeRide(pool, id) {
-  return writeTransaction(pool, async (client) => {
-    const { rows } = await client.query(
-      `WITH removed AS (
-         DELETE FROM encircle.rides WHERE id = $1 RETURNING player_id, awards
-       ), affected AS (
-         SELECT cells.column_index, cells.row_index,
-                CASE WHEN (cells.scores->>removed.player_id)::integer = (award->>2)::integer
-                     THEN cells.scores - removed.player_id
-                     ELSE cells.scores || jsonb_build_object(
-                       removed.player_id,
-                       (cells.scores->>removed.player_id)::integer - (award->>2)::integer
-                     )
-                END AS scores
-         FROM removed
-         CROSS JOIN LATERAL jsonb_array_elements(removed.awards) AS entries(award)
-         JOIN encircle.cells ON cells.column_index = (award->>0)::integer
-                            AND cells.row_index = (award->>1)::integer
-       ), updated AS (
-         UPDATE encircle.cells
-         SET scores = affected.scores
-         FROM affected
-         WHERE cells.column_index = affected.column_index
-           AND cells.row_index = affected.row_index
-           AND affected.scores <> '{}'::jsonb
-       ), emptied AS (
-         DELETE FROM encircle.cells
-         USING affected
-         WHERE cells.column_index = affected.column_index
-           AND cells.row_index = affected.row_index
-           AND affected.scores = '{}'::jsonb
-       )
-       SELECT EXISTS(SELECT 1 FROM removed) AS deleted`,
-      [id],
-    );
-    return rows[0].deleted;
-  });
+  return writeTransaction(pool, (client) => withdrawRide(client, id));
 }
 
 export async function getGame(pool, bounds) {

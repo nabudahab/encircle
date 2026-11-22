@@ -6,7 +6,7 @@ Encircle is a cycling territory game for Purdue Cycling Club. Ride through India
 
 1. Indiana and Illinois share a grid of 0.2 × 0.2 mile squares.
 2. An eligible ride earns one point for each square it passes through. Crossing the same square several times on one ride earns one pass-through point.
-3. Closing a loop earns one bonus point in every square it encloses. Count overlapping loop interiors once per square on the same ride.
+3. A single ride earns one bonus point in each unvisited square surrounded by its crossed squares. The scorer can bridge a gap of one square to detect a loop. Count overlapping interiors once per ride.
 4. The highest point total controls a square. Riders tied for the lead share control, and the square counts for each of them on the leaderboard.
 5. **Squares controlled** counts the squares each rider currently controls, including shared squares. **Largest single capture** ranks riders by the number of distinct enclosed squares on their best eligible ride.
 
@@ -51,7 +51,7 @@ python3 sync/strava_sync.py import --local-only
 
 Imports keep raw GPS tracks in memory for scoring. PostgreSQL stores current scores for occupied squares and compact contributions for rides that score in Indiana. Imports and withdrawals update only the affected squares. Matching timestamps and tracks deduplicate. An edited or differently exported track can produce a second ride, and Strava edits or removals currently require [manual withdrawal](server/README.md#api).
 
-The pilot keeps the API and dashboard on loopback for the single rider. It splits recorded tracks at a two-kilometer position gap, and accepts a loop with endpoints up to 40 meters apart. GPX import also preserves recorded segment breaks and splits gaps over five minutes. The Strava collector uses its own stricter gap thresholds. Cell eligibility uses the center and the current Census boundary. Capture credit requires the full square to fit inside the loop.
+The pilot keeps the API and dashboard on loopback for the single rider. It splits recorded tracks at a two-kilometer position gap. GPX import also preserves recorded segment breaks and splits gaps over five minutes. The Strava collector uses its own stricter gap thresholds. The scorer finds enclosed squares by flood-filling from outside the ride's grid outline. Squares that touch at a corner form a continuous outline. A one-square bridge counts toward detecting enclosure. Points go to the squares the ride crossed and the squares inside its outline. A square is eligible when its center is inside the current Census boundary.
 
 ## Recommended architecture for the club
 
@@ -68,9 +68,9 @@ Start from the pilot's **Node.js API, PostgreSQL, and Python collector**. Keep s
 
 - Use a metric projection for the game grid. Start with NAD83 / UTM zone 16N (EPSG:26916) and a fixed grid origin for Indiana and Illinois. Each square is 321.8688 meters per side in projected coordinates. Key cells by grid ID, column, and row so a cell keeps the same identity across a state line or a viewport change. Store display geometry in WGS84. Choose a local projection and a new grid ID for distant trips.
 - Define a cell as eligible when its center is inside the active boundary. Use authoritative boundary geometry for production and keep the source and grid version with the season. A proper segment/grid traversal finds squares between recorded GPS samples. Split tracks at long time or location gaps so missing data cannot draw shortcuts.
-- For loops, snap near-closures within an agreed tolerance, node the track at intersections, polygonize the closed faces, and union the interiors. Count cells fully enclosed by that geometry. Open legs still earn pass-through points. Use fixtures for figure eights, overlapping loops, GPS gaps, border rides, and ties.
+- For loops, use the squares crossed by each ride as the boundary of a flood fill. Score interior squares once, even when loops overlap. Open legs still earn pass-through points. Use fixtures for figure eights, overlapping loops, GPS gaps, border rides, and ties.
 - Store one contribution per ride and cell with pass-through and capture flags. Apply contribution changes and affected totals in a single transaction. Give imports a stable source ID, and reconcile the latest source state so duplicate jobs, edits, deletes, and out-of-order events can be retried safely. Derive every tied leader from eligible ride totals.
-- Serve occupied cells in the current viewport at close zoom and aggregate geometry or density at statewide zoom. Add vector tiles when measured payload size warrants them. Over two states, a full grid would contain millions of squares.
+- Keep occupied territory visible as filled shapes at statewide zoom and show square borders at closer zooms. Add viewport queries or vector tiles when measured payload size warrants them. Over two states, a full grid would contain millions of squares.
 
 ### Club access and ride sources
 

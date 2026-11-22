@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import pg from 'pg';
-import { scoreIndianaRide } from '../src/scoring.js';
+import { scoreIndianaRide, scoringVersion } from '../src/scoring.js';
 import { getGame, getRide, initializeDatabase, removeRide, saveRide } from './database.js';
 
 const localHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -128,8 +128,10 @@ async function importRide(pool, request, response) {
   }
   const { id, playerId, startedAt, segments } = normalizeRide(await readJson(request));
   const existing = await getRide(pool, id);
-  if (existing) {
-    return sendJson(response, 200, { id, ...existing, duplicate: true });
+  if (existing?.scoringVersion >= scoringVersion) {
+    return sendJson(response, 200, {
+      id, playerId: existing.playerId, passed: existing.passed, enclosed: existing.enclosed, duplicate: true,
+    });
   }
 
   let scored;
@@ -147,12 +149,12 @@ async function importRide(pool, request, response) {
     return [cell.column, cell.row, Number(cell.passed) + Number(cell.enclosed)];
   });
   const published = { id, playerId, passed, enclosed };
-  if (!awards.length) {
+  if (!awards.length && !existing) {
     return sendJson(response, 200, { ...published, duplicate: false });
   }
 
-  const inserted = await saveRide(pool, { ...published, startedAt }, awards);
-  return sendJson(response, inserted ? 201 : 200, { ...published, duplicate: !inserted });
+  const saved = await saveRide(pool, { ...published, startedAt, scoringVersion }, awards);
+  return sendJson(response, saved && awards.length ? 201 : 200, { ...published, duplicate: !saved });
 }
 
 async function handleRequest(pool, request, response) {

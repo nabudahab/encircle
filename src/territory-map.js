@@ -80,7 +80,6 @@ export async function createTerritoryMap({
   let overview = false;
   let styleReady = false;
   let fallback = false;
-  let pointFeatures = [];
   const defaultView = demoAreas[region.areas[0]];
   const map = new renderer.Map({
     container,
@@ -107,30 +106,15 @@ export async function createTerritoryMap({
   }
 
   function refreshCells() {
-    const { cellCenter, unproject } = region.grid ?? midwestGrid;
-    const features = [];
-    const points = [];
-    for (const cell of cells) {
-      const { column, row, key, leaders, color } = cell;
+    const { unproject } = region.grid ?? midwestGrid;
+    const features = cells.map(({ column, row, key, leaders, color }) => {
       const ring = cellCorners(column, row).map(unproject);
       const properties = { key, color, shared: leaders.length > 1, owners: `|${leaders.join("|")}|` };
-      features.push({
+      return {
         type: "Feature", properties, geometry: { type: "Polygon", coordinates: [[...ring, ring[0]]] },
-      });
-      points.push({
-        type: "Feature", properties, geometry: { type: "Point", coordinates: cellCenter(column, row) },
-      });
-    }
+      };
+    });
     map.getSource("territory")?.setData(collection(features));
-    pointFeatures = points;
-    refreshPoints();
-  }
-
-  function refreshPoints() {
-    const features = currentRider
-      ? pointFeatures.filter(({ properties }) => properties.owners.includes(`|${currentRider}|`))
-      : pointFeatures;
-    map.getSource("territory-points")?.setData(collection(features));
   }
 
   function showRider(id) {
@@ -139,7 +123,6 @@ export async function createTerritoryMap({
     map.setPaintProperty("territory-fill", "fill-opacity", opacity(0.64, 0.13));
     map.setPaintProperty("territory-shared", "fill-opacity", opacity(0.82, 0.18));
     map.setPaintProperty("territory-outlines", "line-opacity", opacity(0.82, 0.18));
-    refreshPoints();
   }
 
   function select(key) {
@@ -178,8 +161,7 @@ export async function createTerritoryMap({
     styleReady = true;
     map.addSource("region", { type: "geojson", data: regionSource(region) });
     map.addSource("grid", { type: "geojson", data: collection() });
-    map.addSource("territory", { type: "geojson", data: collection() });
-    map.addSource("territory-points", { type: "geojson", data: collection(), cluster: true, clusterRadius: 22, clusterMaxZoom: 9 });
+    map.addSource("territory", { type: "geojson", data: collection(), tolerance: 0 });
     map.addLayer({
       id: "grid-lines", type: "line", source: "grid", minzoom: 11,
       paint: { "line-color": "#668777", "line-width": 0.6, "line-opacity": 0.27 },
@@ -194,36 +176,27 @@ export async function createTerritoryMap({
     });
     map.addImage("shared-ownership", sharedPattern(), { pixelRatio: 2 });
     map.addLayer({
-      id: "territory-fill", type: "fill", source: "territory", minzoom: 9.5,
+      id: "territory-fill", type: "fill", source: "territory",
       filter: ["!", ["get", "shared"]],
       paint: { "fill-color": ["get", "color"], "fill-opacity": opacity(0.64, 0.13) },
     });
     map.addLayer({
-      id: "territory-shared", type: "fill", source: "territory", minzoom: 9.5,
+      id: "territory-shared", type: "fill", source: "territory",
       filter: ["get", "shared"],
       paint: { "fill-pattern": "shared-ownership", "fill-opacity": opacity(0.82, 0.18) },
     });
     map.addLayer({
-      id: "territory-outlines", type: "line", source: "territory", minzoom: 9.5,
-      paint: { "line-color": ["case", ["get", "shared"], "#666757", ["get", "color"]], "line-width": 1.15, "line-opacity": opacity(0.82, 0.18) },
-    });
-    map.addLayer({
-      id: "territory-selected", type: "line", source: "territory", minzoom: 9.5,
-      filter: ["==", featureId, selected],
-      paint: { "line-color": "#1e3228", "line-width": 3 },
-    });
-    map.addLayer({
-      id: "territory-cluster", type: "circle", source: "territory-points", maxzoom: 9.5,
-      filter: ["has", "point_count"],
+      id: "territory-outlines", type: "line", source: "territory", minzoom: 10,
       paint: {
-        "circle-color": "#b58c4b", "circle-opacity": 0.87, "circle-stroke-color": "#fffdf7", "circle-stroke-width": 2,
-        "circle-radius": ["interpolate", ["linear"], ["get", "point_count"], 2, 5, 50, 9, 300, 15],
+        "line-color": ["case", ["get", "shared"], "#666757", ["get", "color"]],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0, 12, 1.15],
+        "line-opacity": opacity(0.82, 0.18),
       },
     });
     map.addLayer({
-      id: "territory-dot", type: "circle", source: "territory-points", maxzoom: 9.5,
-      filter: ["all", ["!", ["has", "point_count"]], matchesRider()],
-      paint: { "circle-color": ["get", "color"], "circle-radius": 3.5, "circle-stroke-color": "#fffdf7", "circle-stroke-width": 1 },
+      id: "territory-selected", type: "line", source: "territory",
+      filter: ["==", featureId, selected],
+      paint: { "line-color": "#1e3228", "line-width": 3 },
     });
     refreshCells();
     refreshGrid();
@@ -260,22 +233,11 @@ export async function createTerritoryMap({
 
   map.on("click", (event) => {
     const [cell] = featuresAt(event.point, ["territory-fill", "territory-shared"]);
-    if (cell) {
-      onSquare(cell.properties.key);
-      return;
-    }
-    const [point] = featuresAt(event.point, ["territory-cluster", "territory-dot"]);
-    if (point) {
-      overview = false;
-      onSquare(null);
-      map.easeTo({ center: point.geometry.coordinates, zoom: 11.6, duration: 500 });
-      return;
-    }
-    onSquare(null);
+    onSquare(cell?.properties.key ?? null);
   });
 
   map.on("mousemove", (event) => {
-    const clickable = featuresAt(event.point, ["territory-fill", "territory-shared", "territory-cluster", "territory-dot"]);
+    const clickable = featuresAt(event.point, ["territory-fill", "territory-shared"]);
     map.getCanvas().style.cursor = clickable.length ? "pointer" : "";
   });
   map.on("movestart", (event) => {

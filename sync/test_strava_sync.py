@@ -241,6 +241,9 @@ class SyncTests(unittest.TestCase):
             self.assertIn("Strava ride 7: no score", output.getvalue())
             self.assertEqual(len(refreshes), 1)
 
+            self.assertEqual(sync.main(first), 0)
+            self.assertEqual(posted_bodies[7:], [posted_bodies[index] for index in (0, 4, 5, 6)])
+
     def test_historical_backfill_advances_only_completed_windows(self):
         since = Clock.current - timedelta(days=2)
         initial_end = since + timedelta(days=1)

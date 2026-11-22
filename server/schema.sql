@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS encircle.rides (
     awards jsonb NOT NULL CHECK (jsonb_array_length(awards) > 0)
 );
 
+ALTER TABLE encircle.rides ADD COLUMN IF NOT EXISTS scoring_version smallint NOT NULL DEFAULT 1;
+
 CREATE TABLE IF NOT EXISTS encircle.cells (
     column_index integer NOT NULL,
     row_index integer NOT NULL,
